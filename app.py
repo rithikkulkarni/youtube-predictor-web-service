@@ -1,4 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -14,6 +15,19 @@ from model import predict, FEATURE_ORDER
 
 # Placeholder lists and functions; implement as in your feature pipeline
 KEYWORD_LIST = ["how", "what", "why", "when", "is", "are", "does"]
+
+app = FastAPI(
+    title="YouTube Virality Predictor",
+    description="Upload a thumbnail image and enter a video title to predict virality.",
+    version="1.0.0"
+)
+
+app.add_middleware(
+  CORSMiddleware,
+  allow_origins=["https://<your-GH-username>.github.io"],
+  allow_methods=["POST","GET"],
+  allow_headers=["*"],
+)
 
 def compute_clickbait_score(text: str) -> float:
     clickbait_words = {
@@ -32,12 +46,6 @@ def compute_dominant_color_hue(img: np.ndarray) -> float:
     hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
     hist = cv2.calcHist([hsv], [0], None, [180], [0, 180])
     return float(np.argmax(hist))
-
-app = FastAPI(
-    title="YouTube Virality Predictor",
-    description="Upload a thumbnail image and enter a video title to predict virality.",
-    version="1.0.0"
-)
 
 @app.get("/", include_in_schema=False)
 def serve_index():
