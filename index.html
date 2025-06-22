@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Virality Predictor</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 2em auto; padding: 0 1em; }
+    label { font-weight: bold; }
+    input, textarea { width: 100%; padding: 0.5em; margin: 0.5em 0; }
+    button { padding: 0.75em 1.5em; font-size: 1em; }
+    #result { margin-top: 1em; font-size: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>YouTube Virality Predictor</h1>
+  <p>Upload your thumbnail image and paste your video title, description, and tags below. Click Predict to see your video's viral probability.</p>
+
+  <form id="predictForm">
+    <label for="thumbnail">Thumbnail Image:</label>
+    <input type="file" id="thumbnail" name="thumbnail" accept="image/*" required />
+
+    <label for="title">Video Title:</label>
+    <input type="text" id="title" name="title" placeholder="Enter your video title" required />
+
+    <label for="description">Description:</label>
+    <textarea id="description" name="description" rows="4" placeholder="Enter your video description" required></textarea>
+
+    <label for="tags">Tags (comma-separated):</label>
+    <input type="text" id="tags" name="tags" placeholder="tag1, tag2, tag3" required />
+
+    <button type="submit">Predict</button>
+  </form>
+
+  <div id="result"></div>
+
+  <script>
+    const form = document.getElementById('predictForm');
+    const resultDiv = document.getElementById('result');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      resultDiv.textContent = 'Predicting...';
+
+      const formData = new FormData();
+      formData.append('thumbnail', document.getElementById('thumbnail').files[0]);
+      formData.append('title', document.getElementById('title').value);
+      formData.append('description', document.getElementById('description').value);
+      formData.append('tags', document.getElementById('tags').value);
+
+      try {
+        const response = await fetch('/extract_and_predict', {
+          method: 'POST',
+          body: formData
+        });
+        if (!response.ok) throw new Error('Network response was not ok');
+        const data = await response.json();
+        resultDiv.textContent = `Prediction: ${data.prediction === 1 ? 'Likely Viral 🎉' : 'Not Viral'} (Probability: ${
+          data.probability.toFixed(2)
+        })`;
+      } catch (error) {
+        resultDiv.textContent = 'Error: ' + error.message;
+      }
+    });
+  </script>
+</body>
+</html>
