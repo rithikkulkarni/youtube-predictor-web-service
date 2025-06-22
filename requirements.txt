@@ -8,3 +8,4 @@ joblib
 pillow
 opencv-python
 textblob
+textstat
