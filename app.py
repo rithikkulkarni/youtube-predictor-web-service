@@ -1,8 +1,9 @@
+# app.py
+
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 import numpy as np
 from io import BytesIO
 from PIL import Image
@@ -13,129 +14,154 @@ import textstat
 
 from model import predict, FEATURE_ORDER
 
-# Placeholder lists and functions; implement as in your feature pipeline
-KEYWORD_LIST = ["how", "what", "why", "when", "is", "are", "does"]
+# ─── Full clickbait / power / timed word lists ─────────────────────────────────
 
+CLICKBAIT_WORDS = {
+    "amazing", "incredible", "shocking", "jaw-dropping", "mind-blowing",
+    "unbelievable", "you won’t believe", "you’ll never guess", "what happens next",
+    "epic", "ultimate", "must", "insane", "secret", "exposed", "revealed",
+    "hack", "these reasons", "10 reasons", "this trick", "don’t miss",
+    "game changer", "craziest", "revealed", "the truth about", "deal of the day"
+}
+
+POWER_WORDS = {
+    "best", "top", "new", "essential", "easy", "quick", "instant", "effortless",
+    "guaranteed", "proven", "genius", "exclusive", "remarkable", "powerful",
+    "revolutionary", "breakthrough", "must-have", "unlock", "master", "ultimate",
+    "secret", "simple", "transform", "hacks", "tips", "tricks"
+}
+
+TIMED_WORDS = {
+    "now", "today", "just now", "breaking", "this morning", "this afternoon",
+    "this evening", "tonight", "this week", "this weekend", "this month",
+    "this season", "this year", "last minute", "last week", "2023", "2024",
+    "2025", "coming soon", "newly released", "upcoming", "recent", "daily",
+    "weekly", "monthly", "yearly"
+}
+
+# ─── Load face detector ─────────────────────────────────────────────────━━━━━━━
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+)
+
+# ─── FastAPI app setup ─────────────────────────────────────────────────━━━━━━━
 app = FastAPI(
     title="YouTube Virality Predictor",
-    description="Upload a thumbnail image and enter a video title to predict virality.",
+    description="Upload a thumbnail image and enter a video title & tags to predict virality.",
     version="1.0.0"
 )
 
 app.add_middleware(
-  CORSMiddleware,
-  allow_origins=["*"],
-  allow_methods=["POST","GET"],
-  allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["POST", "GET"],
+    allow_headers=["*"],
 )
-
-def compute_clickbait_score(text: str) -> float:
-    clickbait_words = {
-        "amazing", "shocking", "unbelievable", "top", "ultimate", "must",
-        "insane", "you won’t believe", "secret", "revealed", "hack"
-    }
-    words = text.split()
-    clickbait_score = sum(word.lower() in clickbait_words for word in words)
-    return clickbait_score
-
-def compute_title_readability(text: str) -> float:
-    return textstat.flesch_reading_ease(text)
-
-def compute_dominant_color_hue(img: np.ndarray) -> float:
-    # Convert to HSV and compute the hue histogram peak
-    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
-    hist = cv2.calcHist([hsv], [0], None, [180], [0, 180])
-    return float(np.argmax(hist))
 
 @app.get("/", include_in_schema=False)
 def serve_index():
     return FileResponse("static/index.html")
 
-# app.mount("/", StaticFiles(directory="static", html=True), name="static")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# ─── Utility feature functions ─────────────────────────────────────────────────
+
+def compute_clickbait_score(text: str) -> int:
+    return sum(w.lower() in CLICKBAIT_WORDS for w in text.split())
+
+def compute_dominant_color_hue(img: np.ndarray) -> float:
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    hist = cv2.calcHist([hsv], [0], None, [180], [0, 180])
+    return float(np.argmax(hist))
+
+def compute_title_features(title: str) -> dict:
+    blob = TextBlob(title)
+    words = title.split()
+    punctuation = set("!?.,:;-()[]{}")
+    upper_words = [w for w in words if w.isupper()]
+    letters = [c for c in title if c.isalpha()]
+    uppercase_letters = [c for c in letters if c.isupper()]
+
+    return {
+        "title_sentiment": blob.sentiment.polarity,
+        "title_subjectivity": blob.sentiment.subjectivity,
+        "num_question_marks": title.count("?"),
+        "num_exclamation_marks": title.count("!"),
+        "starts_with_keyword": int(words[0].lower() in {"how","what","why","when","is","are","does","who"} if words else 0),
+        "title_length": len(title),
+        "word_count": len(words),
+        "punctuation_count": sum(1 for c in title if c in punctuation),
+        "uppercase_word_count": len(upper_words),
+        "percent_letters_uppercase": round(len(uppercase_letters)/len(letters),3) if letters else 0,
+        "num_digits": sum(c.isdigit() for c in title),
+        "clickbait_score": compute_clickbait_score(title),
+        "num_power_words": sum(w.lower() in POWER_WORDS for w in words),
+        "num_timed_words": sum(phrase in title.lower() for phrase in TIMED_WORDS),
+        "clickbait_phrase_match": int(any(p in title.lower() for p in CLICKBAIT_WORDS)),
+        "title_readability": textstat.flesch_reading_ease(title),
+        "is_listicle": int(title.strip().split()[0].isdigit()),
+        "is_tutorial": int(title.lower().startswith("how to")),
+        "power_word_count": sum(w.lower() in POWER_WORDS for w in words),
+        "timed_word_count": sum(phrase in title.lower() for phrase in TIMED_WORDS),
+    }
+
+# ─── Main endpoint ─────────────────────────────────────────────────━━━━━━━━━
 
 @app.post("/extract_and_predict")
 async def extract_and_predict(
     title: str = Form(...),
-    description: str = Form(...),
     tags: str = Form(...),
     thumbnail: UploadFile = File(...)
 ):
-    # 1. Read and preprocess image
+    # 1. Read & preprocess image
     img_bytes = await thumbnail.read()
     pil_img = Image.open(BytesIO(img_bytes)).convert("RGB")
     img = np.array(pil_img)
 
-    # 2a. Image features
-    avg_red = float(img[:,:,0].mean())
-    avg_green = float(img[:,:,1].mean())
-    avg_blue = float(img[:,:,2].mean())
+    # 2. Image features
+    avg_red = float(img[:, :, 0].mean())
+    avg_green = float(img[:, :, 1].mean())
+    avg_blue = float(img[:, :, 2].mean())
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     brightness = float(gray.mean())
     contrast = float(gray.std())
-    edges = cv2.Canny(gray, 100, 200)
-    thumbnail_edge_density = float(edges.astype(bool).mean())
 
-    # 2b. Dominant color hue
+    # 2a. Face count
+    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+    num_faces = int(len(faces))
+
+    # 2b. Edges & color
+    edges = cv2.Canny(gray, 100, 200)
+    thumbnail_edge_density = float((edges > 0).mean())
     dominant_color_hue = compute_dominant_color_hue(img)
 
     # 3. Title features
-    title_blob = TextBlob(title)
-    title_sentiment = float(title_blob.sentiment.polarity)
-    title_subjectivity = float(title_blob.sentiment.subjectivity)
-    has_question = int("?" in title)
-    has_exclamation = int("!" in title)
-    starts_with_keyword = int(title.lower().split()[0] in KEYWORD_LIST)
-    title_length = int(len(title))
-    word_count = int(len(title.split()))
-    punctuation_count = int(sum(c in string.punctuation for c in title))
-    uppercase_word_count = int(sum(1 for w in title.split() if w.isupper()))
-    letters = [c for c in title if c.isalpha()]
-    percent_letters_uppercase = float(sum(1 for c in letters if c.isupper()) / max(1, len(letters)))
-    has_numbers = int(any(c.isdigit() for c in title))
-    clickbait_score = float(compute_clickbait_score(title))
-    title_readability = float(compute_title_readability(title))
+    title_feats = compute_title_features(title)
 
-    # 4. Description features
-    desc_blob = TextBlob(description)
-    description_length = int(len(description))
-    description_sentiment = float(desc_blob.sentiment.polarity)
-    description_has_keywords = int(any(k in description.lower() for k in KEYWORD_LIST))
-
-    # 5. Tag features
+    # 4. Tag features
     tags_list = [t.strip() for t in tags.split(",") if t.strip()]
-    tag_count = int(len(tags_list))
-    tag_sentiment = float(np.mean([TextBlob(tag).sentiment.polarity for tag in tags_list])) if tags_list else 0.0
+    num_tags = int(len(tags_list))
+    tag_sentiment = float(np.mean([TextBlob(t).sentiment.polarity for t in tags_list])) if tags_list else 0.0
+    num_unique_tags = int(len(set(t.lower() for t in tags_list)))
+    avg_tag_length = float(np.mean([len(t) for t in tags_list])) if tags_list else 0.0
 
-    # 6. Assemble feature dict
+    # 5. Assemble all features
     feature_values = {
         'avg_red': avg_red,
         'avg_green': avg_green,
         'avg_blue': avg_blue,
         'brightness': brightness,
         'contrast': contrast,
-        'title_sentiment': title_sentiment,
-        'title_subjectivity': title_subjectivity,
-        'has_question': has_question,
-        'has_exclamation': has_exclamation,
-        'starts_with_keyword': starts_with_keyword,
-        'title_length': title_length,
-        'word_count': word_count,
-        'punctuation_count': punctuation_count,
-        'uppercase_word_count': uppercase_word_count,
-        'percent_letters_uppercase': percent_letters_uppercase,
-        'has_numbers': has_numbers,
-        'clickbait_score': clickbait_score,
-        'description_length': description_length,
-        'description_sentiment': description_sentiment,
-        'description_has_keywords': description_has_keywords,
-        'tag_count': tag_count,
+        'num_faces': num_faces,
+        **title_feats,
+        'num_tags': num_tags,
         'tag_sentiment': tag_sentiment,
-        'title_readability': title_readability,
-        'dominant_color_hue': dominant_color_hue,
-        'thumbnail_edge_density': thumbnail_edge_density
+        'num_unique_tags': num_unique_tags,
+        'avg_tag_length': avg_tag_length,
+        'thumbnail_edge_density': thumbnail_edge_density,
+        'dominant_color_hue': dominant_color_hue
     }
 
-    # 7. Predict and return
+    # 6. Predict
     result = predict(feature_values, threshold=0.3)
     return result

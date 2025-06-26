@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>YouTube Virality Predictor</title>
+  <title>YT Video Performance Predictor</title>
   <style>
     body { font-family: Arial, sans-serif; max-width: 600px; margin: 2em auto; padding: 0 1em; }
     label { font-weight: bold; }
@@ -13,8 +13,8 @@
   </style>
 </head>
 <body>
-  <h1>YouTube Virality Predictor</h1>
-  <p>Upload your thumbnail image and paste your video title, description, and tags below. Click Predict to see your video's viral probability.</p>
+  <h1>YT Video Performance Predictor</h1>
+  <p>Upload your thumbnail image and paste your video title, and tags below. Click Predict to see your video's viral probability.</p>
 
   <form id="predictForm">
     <label for="thumbnail">Thumbnail Image:</label>
@@ -22,9 +22,6 @@
 
     <label for="title">Video Title:</label>
     <input type="text" id="title" name="title" placeholder="Enter your video title" required />
-
-    <label for="description">Description:</label>
-    <textarea id="description" name="description" rows="4" placeholder="Enter your video description" required></textarea>
 
     <label for="tags">Tags (comma-separated):</label>
     <input type="text" id="tags" name="tags" placeholder="tag1, tag2, tag3" required />
@@ -45,7 +42,6 @@
       const formData = new FormData();
       formData.append('thumbnail', document.getElementById('thumbnail').files[0]);
       formData.append('title', document.getElementById('title').value);
-      formData.append('description', document.getElementById('description').value);
       formData.append('tags', document.getElementById('tags').value);
 
       try {
