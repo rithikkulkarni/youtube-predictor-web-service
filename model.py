@@ -22,7 +22,7 @@ FEATURE_ORDER = [
     'timed_word_count', 'avg_tag_length', 'num_faces', 'num_tags'
 ]
 
-RF_PIPELINE_PATH = "group6_rf.pkl"
+RF_PIPELINE_PATH = "models/group2_rf.pkl"
 
 def load_data(csv_path: str):
     df = pd.read_csv(csv_path)
