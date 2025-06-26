@@ -51,9 +51,7 @@
         });
         if (!response.ok) throw new Error('Network response was not ok');
         const data = await response.json();
-        resultDiv.textContent = `Prediction: ${data.prediction === 1 ? 'Likely Viral 🎉' : 'Not Viral'} (Probability: ${
-          data.probability.toFixed(2)
-        })`;
+        resultDiv.textContent = `Probability: ${data.probability.toFixed(2)}`;
       } catch (error) {
         resultDiv.textContent = 'Error: ' + error.message;
       }
