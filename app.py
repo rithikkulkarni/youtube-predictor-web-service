@@ -1,18 +1,19 @@
 # app.py
 
-from fastapi import FastAPI, File, UploadFile, Form
+import os
+import joblib
+import numpy as np
+from io import BytesIO
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-import numpy as np
-from io import BytesIO
 from PIL import Image
-import cv2
-import string
+import cv2, string
 from textblob import TextBlob
 import textstat
 
-from model import predict, FEATURE_ORDER
+from model import FEATURE_ORDER
 
 # ─── Full clickbait / power / timed word lists ─────────────────────────────────
 
@@ -39,7 +40,7 @@ TIMED_WORDS = {
     "weekly", "monthly", "yearly"
 }
 
-# ─── Load face detector ─────────────────────────────────────────────────━━━━━━━
+# ─── Face detector ─────────────────────────────────────────────────━━━━━━━
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
 )
@@ -47,22 +48,32 @@ face_cascade = cv2.CascadeClassifier(
 # ─── FastAPI app setup ─────────────────────────────────────────────────━━━━━━━
 app = FastAPI(
     title="YouTube Virality Predictor",
-    description="Upload a thumbnail image and enter a video title & tags to predict virality.",
-    version="1.0.0"
+    description="Upload a thumbnail, title & tags and subscriber count to predict virality.",
+    version="1.0.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # or restrict to your domain(s)
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
 
+# serve your static landing page / JS / CSS
 @app.get("/", include_in_schema=False)
 def serve_index():
     return FileResponse("static/index.html")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# ─── Load all pipelines at startup ────────────────────────────────────────────
+MODEL_DIR = "models"
+PIPELINES = {}
+for fn in os.listdir(MODEL_DIR):
+    if fn.endswith("_rf.pkl"):
+        group = fn[:-len("_rf.pkl")]
+        PIPELINES[group] = joblib.load(os.path.join(MODEL_DIR, fn))
+print(f"Loaded models for groups: {list(PIPELINES.keys())}")
 
 # ─── Utility feature functions ─────────────────────────────────────────────────
 
@@ -107,61 +118,69 @@ def compute_title_features(title: str) -> dict:
 
 # ─── Main endpoint ─────────────────────────────────────────────────━━━━━━━━━
 
-@app.post("/extract_and_predict")
-async def extract_and_predict(
+@app.post("/predict/{group}")
+async def predict_group(
+    group: str,
     title: str = Form(...),
     tags: str = Form(...),
     thumbnail: UploadFile = File(...)
 ):
-    # 1. Read & preprocess image
+    # 1) find the right pipeline
+    pipeline = PIPELINES.get(group)
+    if not pipeline:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown group '{group}'. Valid options: {list(PIPELINES.keys())}"
+        )
+
+    # 2) load & preprocess the thumbnail
     img_bytes = await thumbnail.read()
-    pil_img = Image.open(BytesIO(img_bytes)).convert("RGB")
-    img = np.array(pil_img)
+    pil_img   = Image.open(BytesIO(img_bytes)).convert("RGB")
+    img       = np.array(pil_img)
+    gray      = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
-    # 2. Image features
-    avg_red = float(img[:, :, 0].mean())
-    avg_green = float(img[:, :, 1].mean())
-    avg_blue = float(img[:, :, 2].mean())
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    brightness = float(gray.mean())
-    contrast = float(gray.std())
+    # image features
+    avg_red      = float(img[:,:,0].mean())
+    avg_green    = float(img[:,:,1].mean())
+    avg_blue     = float(img[:,:,2].mean())
+    brightness   = float(gray.mean())
+    contrast     = float(gray.std())
+    faces        = face_cascade.detectMultiScale(gray, 1.1, 4)
+    num_faces    = int(len(faces))
+    edges        = cv2.Canny(gray, 100, 200)
+    edge_density = float((edges>0).mean())
+    hue          = compute_dominant_color_hue(img)
 
-    # 2a. Face count
-    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-    num_faces = int(len(faces))
+    # title features
+    tfeats = compute_title_features(title)
 
-    # 2b. Edges & color
-    edges = cv2.Canny(gray, 100, 200)
-    thumbnail_edge_density = float((edges > 0).mean())
-    dominant_color_hue = compute_dominant_color_hue(img)
+    # tag features
+    tlist           = [t.strip() for t in tags.split(",") if t.strip()]
+    num_tags        = len(tlist)
+    tag_sentiment   = float(np.mean([TextBlob(t).sentiment.polarity for t in tlist])) if tlist else 0.0
+    num_unique_tags = int(len(set(t.lower() for t in tlist)))
+    avg_tag_length  = float(np.mean([len(t) for t in tlist])) if tlist else 0.0
 
-    # 3. Title features
-    title_feats = compute_title_features(title)
-
-    # 4. Tag features
-    tags_list = [t.strip() for t in tags.split(",") if t.strip()]
-    num_tags = int(len(tags_list))
-    tag_sentiment = float(np.mean([TextBlob(t).sentiment.polarity for t in tags_list])) if tags_list else 0.0
-    num_unique_tags = int(len(set(t.lower() for t in tags_list)))
-    avg_tag_length = float(np.mean([len(t) for t in tags_list])) if tags_list else 0.0
-
-    # 5. Assemble all features
+    # assemble into the same order your model expects
     feature_values = {
-        'avg_red': avg_red,
-        'avg_green': avg_green,
-        'avg_blue': avg_blue,
-        'brightness': brightness,
-        'contrast': contrast,
-        'num_faces': num_faces,
-        **title_feats,
-        'num_tags': num_tags,
-        'tag_sentiment': tag_sentiment,
-        'num_unique_tags': num_unique_tags,
-        'avg_tag_length': avg_tag_length,
-        'thumbnail_edge_density': thumbnail_edge_density,
-        'dominant_color_hue': dominant_color_hue
+        "avg_red": avg_red,
+        "avg_green": avg_green,
+        "avg_blue": avg_blue,
+        "brightness": brightness,
+        "contrast": contrast,
+        "num_faces": num_faces,
+        **tfeats,
+        "num_tags": num_tags,
+        "tag_sentiment": tag_sentiment,
+        "num_unique_tags": num_unique_tags,
+        "avg_tag_length": avg_tag_length,
+        "thumbnail_edge_density": edge_density,
+        "dominant_color_hue": hue,
     }
 
-    # 6. Predict
-    result = predict(feature_values, threshold=0.3)
-    return result
+    # 3) vectorize in FEATURE_ORDER
+    x_vec = np.array([[feature_values[f] for f in FEATURE_ORDER]])
+    proba = pipeline.predict_proba(x_vec)[0][1]
+    pred  = int(proba >= 0.3)
+
+    return {"group": group, "prediction": pred, "probability": round(proba, 4)}
