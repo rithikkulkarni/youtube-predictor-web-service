@@ -15,11 +15,11 @@ FEATURE_ORDER = [
     'num_exclamation_marks', 'starts_with_keyword', 'title_length',
     'word_count', 'punctuation_count', 'uppercase_word_count',
     'percent_letters_uppercase', 'num_digits', 'clickbait_score',
-    'num_power_words', 'num_timed_words', 'tag_count',
+    'num_power_words', 'num_timed_words',
     'tag_sentiment', 'num_unique_tags', 'clickbait_phrase_match',
     'title_readability', 'is_listicle', 'is_tutorial',
     'dominant_color_hue', 'thumbnail_edge_density', 'power_word_count',
-    'timed_word_count', 'avg_tag_length'
+    'timed_word_count', 'avg_tag_length', 'num_faces', 'num_tags'
 ]
 
 RF_PIPELINE_PATH = "rf_pipeline.pkl"
