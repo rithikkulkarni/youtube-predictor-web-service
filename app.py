@@ -16,8 +16,6 @@ from typing import List
 from pytrends.request import TrendReq
 import requests
 from bs4 import BeautifulSoup
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
 
 from model import FEATURE_ORDER
 
@@ -122,13 +120,6 @@ def compute_title_features(title: str) -> dict:
         "timed_word_count": sum(phrase in title.lower() for phrase in TIMED_WORDS),
     }
 
-# Load the SentenceTransformer model once at import time.
-# The weights and config will be downloaded and cached under ./model_cache.
-MODEL = SentenceTransformer(
-    "all-MiniLM-L6-v2",
-    cache_folder="./model_cache"
-)
-
 def get_google_trend_score(keywords: List[str]) -> float:
     """
     Fetches daily interest for given keywords from Google Trends and returns
@@ -152,65 +143,29 @@ def get_twitter_trend_score(keywords: List[str]) -> float:
     """
     try:
         url = "https://twitter.com/explore/tabs/trending"
-        resp = requests.get(url)
+        resp = requests.get(url, timeout=5)
         soup = BeautifulSoup(resp.text, "html.parser")
         hashtags = [tag.get_text().lstrip("#") for tag in soup.find_all("span")]
         matches = sum(
             1 for kw in keywords
             if any(kw.lower() in h.lower() for h in hashtags)
         )
-        max_count = max(len(hashtags), 1)
-        return matches / max_count
-    except Exception:
-        return 0.0
-
-def get_youtube_trending_similarity(keywords: List[str]) -> float:
-    """
-    Scrapes YouTube's trending page and computes the maximum cosine similarity
-    between the keyword string and any trending video title, using the
-    preloaded SentenceTransformer model.
-    """
-    try:
-        resp = requests.get("https://www.youtube.com/feed/trending")
-        soup = BeautifulSoup(resp.text, "html.parser")
-        titles = [
-            t["title"] for t in soup.select("a#video-title")
-            if t.get("title")
-        ]
-        if not titles:
-            return 0.0
-
-        # Encode the query once
-        query_emb = MODEL.encode(" ".join(keywords), convert_to_numpy=True)
-
-        # Compute similarity against each trending title
-        sims = []
-        for title in titles:
-            title_emb = MODEL.encode(title, convert_to_numpy=True)
-            sim = cosine_similarity(
-                query_emb.reshape(1, -1),
-                title_emb.reshape(1, -1)
-            )[0][0]
-            sims.append(sim)
-
-        return max(sims)
+        return matches / max(len(hashtags), 1)
     except Exception:
         return 0.0
 
 def calculate_trending_score(
     keywords: List[str],
-    w1: float = 0.4,
-    w2: float = 0.3,
-    w3: float = 0.3
+    w1: float = 0.5,
+    w2: float = 0.5,
 ) -> float:
     """
-    Combines Google Trends, Twitter, and YouTube similarity scores
-    into a single trending_score.
+    Combines Google Trends and Twitter scores into a single trending_score.
     """
     g = get_google_trend_score(keywords)
     t = get_twitter_trend_score(keywords)
-    y = get_youtube_trending_similarity(keywords)
-    return round(w1 * g + w2 * t + w3 * y, 4)
+    return round(w1 * g + w2 * t, 4)
+
 
 # ─── Main endpoint ─────────────────────────────────────────────────━━━━━━━━━
 
