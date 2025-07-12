@@ -19,10 +19,10 @@ FEATURE_ORDER = [
     'tag_sentiment', 'num_unique_tags', 'clickbait_phrase_match',
     'title_readability', 'is_listicle', 'is_tutorial',
     'dominant_color_hue', 'thumbnail_edge_density', 'power_word_count',
-    'timed_word_count', 'avg_tag_length', 'num_faces', 'num_tags'
+    'timed_word_count', 'avg_tag_length', 'num_faces', 'num_tags', 'trending_score'
 ]
 
-RF_PIPELINE_PATH = "models/group2_rf.pkl"
+RF_PIPELINE_PATH = "models/group6_rf.pkl"
 
 def load_data(csv_path: str):
     df = pd.read_csv(csv_path)
