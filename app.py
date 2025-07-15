@@ -9,10 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from PIL import Image
-import cv2
+import cv2, string
 from textblob import TextBlob
 import textstat
 from typing import List
+from pytrends.request import TrendReq
+import requests
+from bs4 import BeautifulSoup
 from functools import lru_cache
 
 from model import FEATURE_ORDER
