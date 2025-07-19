@@ -1,9 +1,11 @@
-# app.py — updated with bounded cache and mmap loading
+# app.py — updated to use DataFrame input and silence warnings
 
 import os
 import gc  # Optional: only needed if you call gc.collect() after cache_clear()
+import warnings
 import joblib
 import numpy as np
+import pandas as pd
 from io import BytesIO
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +22,18 @@ from bs4 import BeautifulSoup
 from functools import lru_cache
 
 from model import FEATURE_ORDER
+
+# ─── Silence noisy third‑party warnings ───────────────────────────────────────
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    module="pytrends"
+)  # pandas down‑casting warning inside pytrends
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=r"X does not have valid feature names, but .* was fitted with feature names",
+)
 
 # ─── Full clickbait / power / timed word lists ────────────────────────────────
 CLICKBAIT_WORDS = {
@@ -200,6 +214,7 @@ async def predict_group(
 
     trending_score = calculate_trending_score([title])
 
+    # 4) Assemble features in model‑expected order
     fv = {
         "avg_red": float(avg_red),
         "avg_green": float(avg_green),
@@ -217,8 +232,7 @@ async def predict_group(
         "trending_score": trending_score,
     }
 
-    x_vec = np.array([[fv[f] for f in FEATURE_ORDER]])
-    proba = pipeline.predict_proba(x_vec)[0][1]
-    pred = int(proba >= 0.3)
-
-    return {"group": group, "prediction": pred, "probability": round(proba, 4)}
+    # 5) Use DataFrame to keep feature names so StandardScaler is happy
+    x_df = pd.DataFrame([fv], columns=FEATURE_ORDER)
+    proba = float(pipeline.predict_proba(x_df)[0][1])
+    return {"group": group, "prediction": int(proba >= 0.3), "probability": round(proba, 4)}
